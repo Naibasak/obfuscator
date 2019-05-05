@@ -620,39 +620,66 @@ void CryptoUtils::populate_pool() {
   idx = 0;
 }
 
-bool CryptoUtils::prng_seed() {
+#if defined(_WIN64) || defined(_WIN32)
 
-#if defined(__linux__)
-  std::ifstream devrandom("/dev/urandom");
+  #include <windows.h>
+  #include <ntsecapi.h>
+
+  bool CryptoUtils::prng_seed() {
+    DEBUG_WITH_TYPE("cryptoutils", dbgs() << "cryptoutils seeded with RtlGenRandom\n");
+    if (RtlGenRandom(key, 16)) {
+      memset(ctr, 0, 16);
+
+      // Once the seed is there, we compute the
+      // AES128 key-schedule
+      aes_compute_ks(ks, key);
+
+      seeded = true;
+    }
+    else {
+      errs()<<"RtlGenRandom failed\n";
+      return false;
+    }
+    return true;
+  }
+
 #else
-  std::ifstream devrandom("/dev/random");
+
+  bool CryptoUtils::prng_seed() {
+    #if defined(__linux__)
+      std::ifstream devrandom("/dev/urandom");
+    #else
+      std::ifstream devrandom("/dev/random");
+    #endif
+
+      if (devrandom) {
+
+        devrandom.read(key, 16);
+
+        if (devrandom.gcount() != 16) {
+          errs()<<"Cannot read enough bytes in /dev/random\n";
+        return false;
+        }
+
+        devrandom.close();
+        DEBUG_WITH_TYPE("cryptoutils", dbgs() << "cryptoutils seeded with /dev/random\n");
+
+        memset(ctr, 0, 16);
+
+        // Once the seed is there, we compute the
+        // AES128 key-schedule
+        aes_compute_ks(ks, key);
+
+        seeded = true;
+      } else {
+        errs()<<"Cannot open /dev/random\n";
+      return false;
+      }
+      return true;
+  }
+
 #endif
 
-  if (devrandom) {
-
-    devrandom.read(key, 16);
-
-    if (devrandom.gcount() != 16) {
-      errs()<<"Cannot read enough bytes in /dev/random\n";
-	  return false;
-    }
-
-    devrandom.close();
-    DEBUG_WITH_TYPE("cryptoutils", dbgs() << "cryptoutils seeded with /dev/random\n");
-
-    memset(ctr, 0, 16);
-
-    // Once the seed is there, we compute the
-    // AES128 key-schedule
-    aes_compute_ks(ks, key);
-
-    seeded = true;
-  } else {
-    errs()<<"Cannot open /dev/random\n";
-	return false;
-  }
-  return true;
-}
 
 void CryptoUtils::inc_ctr() {
   uint64_t iseed;
